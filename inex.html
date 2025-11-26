@@ -1,0 +1,548 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Maître de Conjugaison Française - Présent Simple</title>
+    <!-- Load Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Configure Tailwind for Dark Mode -->
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    fontFamily: {
+                        sans: ['Inter', 'sans-serif'],
+                    },
+                }
+            }
+        }
+    </script>
+    <style>
+        /* Custom Font and Body Styling */
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@100..900&display=swap');
+        body { font-family: 'Inter', sans-serif; }
+        
+        /* Animation for incorrect answers */
+        @keyframes shake {
+            0%, 100% { transform: translateX(0); }
+            10%, 30%, 50%, 70%, 90% { transform: translateX(-5px); }
+            20%, 40%, 60%, 80% { transform: translateX(5px); }
+        }
+        .animate-shake {
+            animation: shake 0.5s ease-in-out;
+        }
+    </style>
+</head>
+<body class="min-h-screen transition-colors duration-500 bg-gray-50 dark:bg-gray-900">
+
+    <div id="app-root" class="p-4 sm:p-8">
+        <!-- Content will be rendered here by JavaScript -->
+        <div class="max-w-4xl mx-auto">
+            <div id="dark-mode-toggle-container" class="flex justify-end mb-4"></div>
+            <header id="app-header" class="text-center py-6 mb-8 bg-white dark:bg-slate-800 rounded-xl shadow-lg dark:shadow-xl dark:shadow-slate-950/50 transition-colors"></header>
+            <div id="tab-navigation-container" class="flex justify-center mb-6 space-x-4"></div>
+            <div id="content-area" class="p-6 bg-white dark:bg-slate-800 rounded-2xl shadow-2xl dark:shadow-none transition-colors">
+                <!-- Tab content goes here -->
+            </div>
+        </div>
+    </div>
+
+    <script type="module">
+        // --- FIREBASE IMPORTS AND SETUP (Required for Canvas Environment) ---
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+        // Global variables provided by the environment
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+        const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : null;
+        const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
+
+        let auth, db, userId = null;
+        let isAuthReady = false;
+
+        // --- GLOBAL STATE ---
+        let activeTab = 'exercises';
+        let isDarkMode = true; // Start in dark mode
+        let completedExercises = JSON.parse(localStorage.getItem('completedExercises') || '{}');
+        let score = Object.keys(completedExercises).length;
+        let totalAttempts = 0;
+
+        // --- DATA: 30 EXERCISES ---
+        const exercisesData = [
+            { id: 1, type: 'fill', tense: 'Passé Composé', prompt_pt: 'Eu (falar) 🗣️ com minha mãe ontem.', sentence_fr: 'Je ___ avec ma mère hier.', verb_infinitive: 'parler', correct_answer: 'ai parlé', hint: 'O Passé Composé é formado pelo auxiliar (Avoir) conjugado no presente (j\'ai) + o particípio passado do verbo principal (parlé). Auxiliar Avoir é usado para a maioria dos verbos.' },
+            { id: 2, type: 'fill', tense: 'Futur Simple', prompt_pt: 'Nós (acabar) 🏁 o trabalho amanhã.', sentence_fr: 'Nous ___ le travail demain.', verb_infinitive: 'finir', correct_answer: 'finirons', hint: 'O Futur Simple é formado pelo infinitivo do verbo (finir) + as terminações do presente do auxiliar Avoir, ajustadas: -ons para Nous.' },
+            { id: 3, type: 'fill', tense: 'Passé Composé', prompt_pt: 'Você (ir) 🏃 para a escola de carro. (Verbo de movimento, DR MRS VANDERTRAMP)', sentence_fr: 'Tu ___ à l\'école en voiture.', verb_infinitive: 'aller', correct_answer: 'es allé', alternative_answers: ['es allée'], hint: 'O verbo "aller" usa o auxiliar Être. A conjugação é \'Tu es\' + particípio passado \'allé\'. Lembre-se que o particípio deve concordar em gênero (allée) e número, mas a versão masculina é aceita.' },
+            { id: 4, type: 'fill', tense: 'Futur Simple', prompt_pt: 'Eles (tomar) ☕ um café juntos.', sentence_fr: 'Ils ___ un café ensemble.', verb_infinitive: 'prendre', correct_answer: 'prendront', hint: 'Verbos em -RE perdem o \'e\' final no Futur Simple. O radical é \'prendr-\'. Adiciona-se a terminação \'-ont\' para Ils/Elles.' },
+            { id: 5, type: 'fill', tense: 'Passé Composé', prompt_pt: 'Ela (comer) 🍕 uma pizza inteira!', sentence_fr: 'Elle ___ une pizza entière.', verb_infinitive: 'manger', correct_answer: 'a mangé', hint: 'O Passé Composé de \'manger\' usa o auxiliar Avoir no presente (\'Elle a\') + particípio passado \'mangé\'.' },
+            { id: 6, type: 'fill', tense: 'Présent Simple', prompt_pt: 'Nós (dançar) 💃 todos os dias. (Ação habitual)', sentence_fr: 'Nous ___ tous les jours.', verb_infinitive: 'danser', correct_answer: 'dansons', hint: 'No Présent Simple, a conjugação de verbos em -ER na primeira pessoa do plural (Nous) é feita adicionando a terminação \'-ons\'.' },
+            { id: 7, type: 'fill', tense: 'Futur Simple', prompt_pt: 'Eu (ser) 👑 o próximo rei um dia.', sentence_fr: 'Je ___ le prochain roi un jour.', verb_infinitive: 'être', correct_answer: 'serai', hint: '\'Être\' é um verbo irregular no Futur Simple. O radical especial é \'ser-\'. Adiciona-se a terminação \'-ai\' para Je.' },
+            { id: 8, type: 'fill', tense: 'Passé Composé', prompt_pt: 'Eles (fazer) 🛠️ todo o trabalho sozinhos.', sentence_fr: 'Ils ___ tout le travail seuls.', verb_infinitive: 'faire', correct_answer: 'ont fait', hint: '\'Faire\' tem um particípio passado irregular, \'fait\'. Usa-se o auxiliar Avoir conjugado no presente: \'Ils ont\' + \'fait\'.' },
+            { id: 9, type: 'fill', tense: 'Présent Simple', prompt_pt: 'Você (ter) 🐶 um cachorro agora. (Estado no presente)', sentence_fr: 'Tu ___ un chien maintenant.', verb_infinitive: 'avoir', correct_answer: 'as', hint: 'O Présent Simple de \'avoir\' (ter) para a segunda pessoa do singular (Tu) é irregular: \'Tu as\'.' },
+            { id: 10, type: 'fill', tense: 'Passé Composé', prompt_pt: 'Eu (vir) 🚶 de Paris ontem à noite.', sentence_fr: 'Je ___ de Paris hier soir.', verb_infinitive: 'venir', correct_answer: 'suis venu', alternative_answers: ['suis venue'], hint: '\'Venir\' (vir) usa o auxiliar Être. Conjugação: \'Je suis\' + \'venu\'. Concordância de gênero (venue) é obrigatória dependendo do sujeito, mas a forma mais simples é aceita.' },
+            { id: 11, type: 'fill', tense: 'Futur Simple', prompt_pt: 'Você (poder) 💪 me ajudar amanhã?', sentence_fr: 'Tu ___ m\'aider demain?', verb_infinitive: 'pouvoir', correct_answer: 'pourras', hint: '\'Pouvoir\' é irregular no Futur Simple. O radical especial é \'pourr-\'. A terminação para Tu é \'-as\'.' },
+            { id: 12, type: 'fill', tense: 'Présent Simple', prompt_pt: 'Eles (dizer) 💬 a verdade.', sentence_fr: 'Ils ___ la vérité.', verb_infinitive: 'dire', correct_answer: 'disent', hint: 'No Présent Simple, a conjugação de \'dire\' (dizer) para a terceira pessoa do plural (Ils/Elles) é \'disent\'.' },
+            { id: 13, type: 'fill', tense: 'Passé Composé', prompt_pt: 'Ele (viver) 🏙️ em Londres por dez anos.', sentence_fr: 'Il ___ à Londres pendant dix ans.', verb_infinitive: 'vivre', correct_answer: 'a vécu', hint: '\'Vivre\' tem particípio passado irregular, \'vécu\'. Usa-se o auxiliar Avoir: \'Il a\' + \'vécu\'.' },
+            { id: 14, type: 'fill', tense: 'Futur Simple', prompt_pt: 'Nós (querer) 💍 casar em breve.', sentence_fr: 'Nous ___ nous marier bientôt.', verb_infinitive: 'vouloir', correct_answer: 'voudrons', hint: '\'Vouloir\' é irregular no Futur Simple. O radical especial é \'voudr-\'. A terminação para Nous é \'-ons\'.' },
+            { id: 15, type: 'fill', tense: 'Présent Simple', prompt_pt: 'Eu (cantar) 🎤 na igreja todos os domingos. (Hábito no presente)', sentence_fr: 'Je ___ à l\'église tous les dimanches.', verb_infinitive: 'chanter', correct_answer: 'chante', hint: 'No Présent Simple, verbos em -ER (como chanter) para a primeira pessoa do singular (Je) terminam em \'-e\'.' },
+            { id: 16, type: 'fill', tense: 'Passé Composé', prompt_pt: 'Você (dormir) 😴 por doze horas seguidas.', sentence_fr: 'Tu ___ douze heures d\'affilée.', verb_infinitive: 'dormir', correct_answer: 'as dormi', hint: '\'Dormir\' é regular no Passé Composé. Particípio passado é \'dormi\'. Auxiliar Avoir: \'Tu as\' + \'dormi\'.' },
+            { id: 17, type: 'fill', tense: 'Futur Simple', prompt_pt: 'Eu (ir) 🚀 para a lua!', sentence_fr: 'J\' ___ sur la lune !', verb_infinitive: 'aller', correct_answer: 'irai', hint: '\'Aller\' é irregular no Futur Simple. O radical especial é \'ir-\'. A terminação para Je é \'-ai\'.' },
+            { id: 18, type: 'fill', tense: 'Présent Simple', prompt_pt: 'Ela (conhecer) 🧑‍🤝‍🧑 todas as pessoas aqui. (Estado contínuo no presente)', sentence_fr: 'Elle ___ tout le monde ici.', verb_infinitive: 'connaître', correct_answer: 'connaît', hint: 'No Présent Simple, a conjugação de \'connaître\' (conhecer) para a terceira pessoa do singular (Il/Elle/On) é \'connaît\'.' },
+            { id: 19, type: 'fill', tense: 'Passé Composé', prompt_pt: 'Nós (descer) ⬇️ as escadas rapidamente.', sentence_fr: 'Nous ___ les escaliers rapidement.', verb_infinitive: 'descendre', correct_answer: 'sommes descendus', alternative_answers: ['sommes descendues'], hint: '\'Descendre\' (descer) usa o auxiliar Être. Conjugação: \'Nous sommes\' + \'descendus\'. O plural é marcado com \'s\'.' },
+            { id: 20, type: 'fill', tense: 'Futur Simple', prompt_pt: 'Vocês (fazer) 🧑‍🍳 o jantar esta noite?', sentence_fr: 'Vous ___ le dîner ce soir?', verb_infinitive: 'faire', correct_answer: 'ferez', hint: '\'Faire\' é irregular no Futur Simple. O radical especial é \'fer-\'. A terminação para Vous é \'-ez\'.' },
+            { id: 21, type: 'fill', tense: 'Présent Simple', prompt_pt: 'Você (acabar) 📏 a lição agora.', sentence_fr: 'Tu ___ la leçon maintenant.', verb_infinitive: 'finir', correct_answer: 'finis', hint: 'No Présent Simple, verbos em -IR (como finir) para a segunda pessoa do singular (Tu) terminam em \'-is\'.' },
+            { id: 22, type: 'fill', tense: 'Passé Composé', prompt_pt: 'Ele (ver) 👁️ o filme na semana passada.', sentence_fr: 'Il ___ le film la semaine dernière.', verb_infinitive: 'voir', correct_answer: 'a vu', hint: '\'Voir\' tem particípio passado irregular, \'vu\'. Auxiliar Avoir: \'Il a\' + \'vu\'.' },
+            { id: 23, type: 'fill', tense: 'Futur Simple', prompt_pt: 'Ela (comprar) 🛍️ um carro novo no próximo ano.', sentence_fr: 'Elle ___ une nouvelle voiture l\'année prochaine.', verb_infinitive: 'acheter', correct_answer: 'achètera', hint: 'O radical é \'achèter-\' (o \'e\' se torna \'è\' para manter a pronúncia aberta) + terminação \'-a\' para Elle.' },
+            { id: 24, type: 'fill', tense: 'Présent Simple', prompt_pt: 'Eu (ser) 👨‍🦱 grande e forte. (Descrição no presente)', sentence_fr: 'Je ___ grand et fort.', verb_infinitive: 'être', correct_answer: 'suis', hint: '\'Être\' é um verbo irregular no Présent Simple. A conjugação para a primeira pessoa do singular (Je) é \'Je suis\'.' },
+            { id: 25, type: 'fill', tense: 'Passé Composé', prompt_pt: 'Meu avô (morrer) ✝️ na guerra.', sentence_fr: 'Mon grand-père ___ à la guerre.', verb_infinitive: 'mourir', correct_answer: 'est mort', hint: '\'Mourir\' (morrer) usa o auxiliar Être. Conjugação: \'Mon grand-père est\' (3ª pessoa sing.) + particípio passado \'mort\'.' },
+            { id: 26, type: 'fill', tense: 'Futur Simple', prompt_pt: 'Eles (vir) 👋 para a festa mais tarde.', sentence_fr: 'Ils ___ à la fête plus tard.', verb_infinitive: 'venir', correct_answer: 'viendront', hint: '\'Venir\' é irregular no Futur Simple. O radical especial é \'viendr-\'. Terminação para Ils/Elles é \'-ont\'.' },
+            { id: 27, type: 'fill', tense: 'Présent Simple', prompt_pt: 'Nós (comer) 🍔 sempre fora aos sábados. (Hábito no presente)', sentence_fr: 'Nous ___ toujours au restaurant le samedi.', verb_infinitive: 'manger', correct_answer: 'mangeons', hint: 'No Présent Simple, verbos em -ER (como manger) para a primeira pessoa do plural (Nous) terminam em \'-eons\' para manter a pronúncia suave do \'g\'.' },
+            { id: 28, type: 'fill', tense: 'Passé Composé', prompt_pt: 'Eu (colocar) 🔑 as chaves na mesa.', sentence_fr: 'J\' ___ les clés sur la table.', verb_infinitive: 'mettre', correct_answer: 'ai mis', hint: '\'Mettre\' tem particípio passado irregular, \'mis\'. Auxiliar Avoir: \'J\'ai\' + \'mis\'.' },
+            { id: 29, type: 'fill', tense: 'Futur Simple', prompt_pt: 'Você (saber) 💡 a resposta do exame?', sentence_fr: 'Tu ___ la réponse à l\'examen?', verb_infinitive: 'savoir', correct_answer: 'sauras', hint: '\'Savoir\' é irregular no Futur Simple. O radical especial é \'saur-\'. Terminação para Tu é \'-as\'.' },
+            { id: 30, type: 'fill', tense: 'Présent Simple', prompt_pt: 'Vocês (pegar) 🚌 o ônibus todos os dias. (Ação habitual no presente)', sentence_fr: 'Vous ___ le bus tous les jours.', verb_infinitive: 'prendre', correct_answer: 'prenez', hint: 'No Présent Simple, verbos em -RE (como prendre) para a segunda pessoa do plural (Vous) terminam em \'-ez\'.' },
+        ];
+
+        // --- DATA: REFERENCE TABLES (French Titles) ---
+        const referenceData = [
+            {
+                title: 'Passé Composé: Auxiliaire AVOIR (Majorité des verbes)',
+                rows: [
+                    ['Je', 'ai parlé / ai fini'],
+                    ['Tu', 'as parlé / as fini'],
+                    ['Il/Elle/On', 'a parlé / a fini'],
+                    ['Nous', 'avons parlé / avons fini'],
+                    ['Vous', 'avez parlé / avez fini'],
+                    ['Ils/Elles', 'ont parlé / ont fini'],
+                ],
+                notes: 'Usa-se AVOIR como auxiliar para a maioria dos verbos. O particípio passado não sofre alteração, exceto com objetos diretos (regra não abordada aqui).'
+            },
+            {
+                title: 'Passé Composé: Auxiliaire ÊTRE (Verbes de la maison d\'Être)',
+                rows: [
+                    ['Je', 'suis allé(e)'],
+                    ['Tu', 'es allé(e)'],
+                    ['Il/Elle/On', 'est allé(e)'],
+                    ['Nous', 'sommes allé(e)s'],
+                    ['Vous', 'êtes allé(e)(s)'],
+                    ['Ils/Elles', 'sont allé(e)s'],
+                ],
+                notes: 'Usa-se ÊTRE para verbos de movimento/estado. O particípio passado deve concordar em gênero (E) e número (S) com o sujeito.'
+            },
+            {
+                title: 'Présent Simple: Réguliers (-ER, -IR, -RE)',
+                rows: [
+                    ['Je', 'parle / finis / prends'],
+                    ['Tu', 'parles / finis / prends'],
+                    ['Il/Elle/On', 'parle / finit / prend'],
+                    ['Nous', 'parlons / finissons / prenons'],
+                    ['Vous', 'parlez / finissez / prenez'],
+                    ['Ils/Elles', 'parlent / finissent / prennent'],
+                ],
+                notes: 'Verbos em -ER: radical + e, es, e, ons, ez, ent. Verbos em -IR: radical + is, is, it, issons, issez, issent. Verbos em -RE: radical + s, s, (nada), ons, ez, ent.'
+            },
+            {
+                title: 'Futur Simple: Réguliers (-ER, -IR, -RE)',
+                rows: [
+                    ['Je', 'parlerai / finirai / prendrai'],
+                    ['Tu', 'parleras / finirás / prenderas'],
+                    ['Il/Elle/On', 'parlera / finirà / prendra'],
+                    ['Nous', 'parlerons / finirons / prendrons'],
+                    ['Vous', 'parlerez / finirez / prendrez'],
+                    ['Ils/Elles', 'parleront / finiront / prendront'],
+                ],
+                notes: 'Radical = Infinitivo completo (exceto -RE, que perde o \'e\') + Terminações: -ai, -as, -a, -ons, -ez, -ont.'
+            },
+        ];
+
+        // --- UTILITY FUNCTIONS & ICONS ---
+        const SVG_BOOK_OPEN = `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 19.5c0 .5.4 1 1 1h18c.6 0 1-.5 1-1V5c0-1.5-1.5-2-3-2H4c-1.5 0-3 .5-3 2v14.5"/><path d="M22 5h-4a2 2 0 0 0-2 2v10a2 2 0 0 1 2 2h4"/><path d="M12 20h10"/><path d="M12 5v15"/></svg>`;
+        const SVG_ZAP = `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon></svg>`;
+        const SVG_SUN = `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="5"></circle><line x1="12" y1="1" x2="12" y2="3"></line><line x1="12" y1="21" x2="12" y2="23"></line><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line><line x1="1" y1="12" x2="3" y2="12"></line><line x1="21" y1="12" x2="23" y2="12"></line><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line></svg>`;
+        const SVG_MOON = `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path></svg>`;
+
+        const normalizeText = (text) => {
+            if (!text) return '';
+            return text.toLowerCase().trim()
+                .normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+        };
+
+        // --- APP LOGIC AND RENDERERS ---
+
+        const handleAuth = async () => {
+            if (!firebaseConfig) {
+                console.error("Firebase config is missing.");
+                isAuthReady = true;
+                renderApp();
+                return;
+            }
+
+            const app = initializeApp(firebaseConfig);
+            auth = getAuth(app);
+            db = getFirestore(app);
+
+            onAuthStateChanged(auth, (user) => {
+                userId = user ? user.uid : 'Anonyme';
+                isAuthReady = true;
+                renderApp();
+            });
+
+            try {
+                if (initialAuthToken) {
+                    await signInWithCustomToken(auth, initialAuthToken);
+                } else {
+                    await signInAnonymously(auth);
+                }
+            } catch (error) {
+                console.error("Firebase Auth failed, signing in anonymously:", error);
+                await signInAnonymously(auth);
+            }
+        };
+
+        const toggleDarkMode = () => {
+            isDarkMode = !isDarkMode;
+            document.documentElement.classList.toggle('dark', isDarkMode);
+            localStorage.setItem('isDarkMode', isDarkMode);
+            renderApp(); // Re-render to update the button icon
+        };
+        
+        const resetApp = () => {
+            completedExercises = {};
+            score = 0;
+            totalAttempts = 0;
+            localStorage.removeItem('completedExercises');
+            // Hard refresh to fully reset state, including input fields
+            window.location.reload(); 
+        };
+
+        const handleExerciseCompletion = (isCorrect, exerciseId) => {
+            totalAttempts++;
+
+            if (isCorrect) {
+                if (!completedExercises[exerciseId]) {
+                    completedExercises[exerciseId] = true;
+                    score++;
+                    localStorage.setItem('completedExercises', JSON.stringify(completedExercises));
+                }
+            }
+            renderApp(); // Re-render the completion message
+            // Re-render the specific card to show the checkmark/feedback
+            document.getElementById(`exercise-card-${exerciseId}`).outerHTML = renderExerciseCard(exercisesData.find(e => e.id === exerciseId));
+            addCardEventListeners(exerciseId);
+        };
+
+        const checkAnswer = (exerciseId) => {
+            const cardElement = document.getElementById(`exercise-card-${exerciseId}`);
+            const inputElement = cardElement.querySelector('input');
+            const exercise = exercisesData.find(e => e.id === exerciseId);
+
+            if (!inputElement || !exercise) return;
+
+            const inputValue = inputElement.value;
+            if (!inputValue.trim()) return;
+
+            const normalizedInput = normalizeText(inputValue);
+            const normalizedCorrect = normalizeText(exercise.correct_answer);
+            const normalizedAlternatives = (exercise.alternative_answers || []).map(normalizeText);
+
+            const isCorrect = normalizedInput === normalizedCorrect || normalizedAlternatives.includes(normalizedInput);
+
+            // Temporarily store status on the DOM element or use a separate state if complex
+            cardElement.dataset.status = isCorrect ? 'correct' : 'incorrect';
+            cardElement.dataset.showHint = 'false'; // Hide hint after attempt
+
+            handleExerciseCompletion(isCorrect, exerciseId);
+
+            if (!isCorrect) {
+                cardElement.classList.add('animate-shake');
+                setTimeout(() => cardElement.classList.remove('animate-shake'), 500);
+            }
+        };
+
+        const renderReferenceTable = (data) => {
+            let tableRows = data.rows.map(([subject, conjugation]) => `
+                <tr class="hover:bg-blue-50 dark:hover:bg-slate-600 transition duration-150">
+                    <td class="px-6 py-3 whitespace-nowrap text-sm font-medium text-gray-900 dark:text-gray-200 w-1/4">
+                        ${subject}
+                    </td>
+                    <td class="px-6 py-3 whitespace-nowrap text-lg font-semibold text-blue-600 dark:text-blue-400 w-3/4">
+                        ${conjugation}
+                    </td>
+                </tr>
+            `).join('');
+
+            return `
+                <div class="bg-white dark:bg-slate-700 p-6 rounded-xl shadow-lg dark:shadow-xl dark:shadow-slate-800 mb-8 border border-blue-100 dark:border-slate-600 transition duration-300 hover:shadow-xl">
+                    <h3 class="text-xl font-bold text-blue-700 dark:text-blue-300 mb-4 border-b pb-2 dark:border-slate-600 flex items-center">
+                        <span class="w-5 h-5 mr-2 text-blue-500 dark:text-blue-400">${SVG_BOOK_OPEN}</span>
+                        ${data.title}
+                    </h3>
+                    <table class="min-w-full divide-y divide-blue-200 dark:divide-slate-600">
+                        <tbody class="bg-white dark:bg-slate-700 divide-y divide-gray-100 dark:divide-slate-600">
+                            ${tableRows}
+                        </tbody>
+                    </table>
+                    <p class="mt-4 text-sm text-gray-500 dark:text-gray-300 italic bg-blue-50 dark:bg-blue-900 p-3 rounded-lg border-blue-200 dark:border-blue-700">
+                        ⚠️ ${data.notes}
+                    </p>
+                </div>
+            `;
+        };
+
+        const renderExerciseCard = (exercise) => {
+            const isComplete = completedExercises[exercise.id];
+            const status = document.getElementById(`exercise-card-${exercise.id}`)?.dataset.status || (isComplete ? 'correct' : 'initial');
+            const showHint = document.getElementById(`exercise-card-${exercise.id}`)?.dataset.showHint === 'true';
+
+            let statusClass = "bg-white dark:bg-slate-800 border-blue-300 dark:border-slate-700";
+            let statusFeedback = '🤔 Entrez la bonne conjugaison.';
+            
+            if (status === 'correct') {
+                statusClass = "bg-green-100 dark:bg-green-900 border-green-500 dark:border-green-700 ring-4 ring-green-200 dark:ring-green-800";
+                statusFeedback = `✅ Parfait ! La bonne conjugaison est "${exercise.correct_answer}".`;
+            } else if (status === 'incorrect') {
+                statusClass = "bg-red-100 dark:bg-red-900 border-red-500 dark:border-red-700 ring-4 ring-red-200 dark:ring-red-800";
+                statusFeedback = `❌ Oups ! Essayez à nouveau. Rappelez-vous que le verbe principal est "${exercise.verb_infinitive}".`;
+            }
+
+            return `
+                <div id="exercise-card-${exercise.id}" data-id="${exercise.id}" data-status="${status}" data-show-hint="${showHint}"
+                     class="p-6 rounded-2xl shadow-xl dark:shadow-none transition-all duration-500 ${isComplete ? 'opacity-80' : 'hover:shadow-2xl dark:hover:shadow-white/10'} mb-6 border-b-4 ${statusClass}">
+                    
+                    <div class="flex justify-between items-start mb-4">
+                        <span class="text-xs font-semibold uppercase text-blue-500 dark:text-blue-200 bg-blue-100 dark:bg-blue-900 px-3 py-1 rounded-full">
+                            ${exercise.tense}
+                        </span>
+                        <span class="text-sm font-medium text-gray-600 dark:text-gray-400">
+                            Verbe: <strong class="text-indigo-600 dark:text-indigo-400">${exercise.verb_infinitive}</strong>
+                        </span>
+                    </div>
+
+                    <p class="text-base text-gray-700 dark:text-gray-200 mb-4 italic p-2 bg-yellow-50 dark:bg-yellow-900 rounded-lg border-l-4 border-yellow-300 dark:border-yellow-700">
+                        🇧🇷 **Votre Tâche (PT):** ${exercise.prompt_pt}
+                    </p>
+
+                    <div class="flex flex-col sm:flex-row items-center space-y-3 sm:space-y-0 sm:space-x-2">
+                        <div class="text-xl font-light text-gray-800 dark:text-gray-100 flex-shrink-0 w-full sm:w-auto">
+                            ${exercise.sentence_fr.split('___')[0]}
+                        </div>
+                        <input
+                            type="text"
+                            value="${isComplete ? exercise.correct_answer : ''}"
+                            data-exercise-id="${exercise.id}"
+                            ${isComplete ? 'disabled' : ''}
+                            placeholder="conjuguez ici"
+                            class="input-conjugaison w-full sm:w-1/3 p-2 text-center text-xl font-bold rounded-lg transition-all duration-300 focus:ring-4 
+                                ${isComplete
+                                    ? 'bg-green-50 dark:bg-green-800 text-green-700 dark:text-green-200 cursor-not-allowed border-green-500 dark:border-green-600'
+                                    : status === 'incorrect'
+                                    ? 'border-red-500 dark:border-red-600 focus:border-red-600 focus:ring-red-200 dark:bg-slate-700 dark:text-white'
+                                    : 'border-gray-300 dark:border-slate-600 focus:border-blue-500 focus:ring-blue-200 dark:bg-slate-700 dark:text-white'
+                            }"
+                        />
+                        <div class="text-xl font-light text-gray-800 dark:text-gray-100 flex-shrink-0 w-full sm:w-auto text-right">
+                            ${exercise.sentence_fr.split('___')[1]}
+                        </div>
+                    </div>
+
+                    <div class="mt-4 flex flex-col sm:flex-row items-center justify-between space-y-2 sm:space-y-0">
+                        <p class="text-sm font-medium transition-colors duration-300 ${status === 'correct' ? 'text-green-600 dark:text-green-400' : status === 'incorrect' ? 'text-red-600 dark:text-red-400' : 'text-gray-500 dark:text-gray-400'}">
+                            ${statusFeedback}
+                        </p>
+
+                        <div class="flex space-x-2">
+                            ${status === 'incorrect' && !isComplete ? `
+                                <button data-action="toggle-hint" data-exercise-id="${exercise.id}"
+                                    class="px-4 py-2 text-sm font-semibold rounded-full bg-yellow-400 text-yellow-900 hover:bg-yellow-500 dark:bg-yellow-700 dark:text-yellow-100 dark:hover:bg-yellow-600 transition duration-200 shadow-md hover:shadow-lg"
+                                >
+                                    ${showHint ? 'Cacher l\'Indice' : 'Indice'} 💡
+                                </button>` : ''}
+                            
+                            ${!isComplete ? `
+                                <button data-action="check-answer" data-exercise-id="${exercise.id}" 
+                                    class="btn-check px-4 py-2 text-sm font-bold rounded-full bg-blue-600 text-white hover:bg-blue-700 transition duration-200 shadow-lg disabled:opacity-50 disabled:cursor-not-allowed"
+                                >
+                                    Vérifier ✅
+                                </button>` : `
+                                <span class="px-4 py-2 text-sm font-bold rounded-full bg-green-500 text-white shadow-lg">
+                                    Complet ! 🎉
+                                </span>`
+                            }
+                        </div>
+                    </div>
+
+                    ${showHint ? `
+                        <p class="mt-4 p-3 bg-gray-100 dark:bg-slate-700 text-gray-700 dark:text-gray-200 text-sm rounded-lg border-l-4 border-gray-400 dark:border-slate-600">
+                            **DICA:** ${exercise.hint}
+                        </p>` : ''
+                    }
+                </div>
+            `;
+        };
+
+        const addCardEventListeners = (exerciseId) => {
+            const cardElement = document.getElementById(`exercise-card-${exerciseId}`);
+            if (!cardElement) return;
+
+            const inputElement = cardElement.querySelector('.input-conjugaison');
+            const checkButton = cardElement.querySelector('[data-action="check-answer"]');
+            const hintButton = cardElement.querySelector('[data-action="toggle-hint"]');
+
+            if (inputElement) {
+                inputElement.onkeydown = (e) => {
+                    if (e.key === 'Enter') {
+                        checkAnswer(exerciseId);
+                    }
+                };
+                inputElement.oninput = () => {
+                    if (checkButton) checkButton.disabled = !inputElement.value.trim();
+                };
+                // Initial state check for the button
+                if (checkButton) checkButton.disabled = !inputElement.value.trim();
+            }
+
+            if (checkButton) {
+                checkButton.onclick = () => checkAnswer(exerciseId);
+            }
+
+            if (hintButton) {
+                hintButton.onclick = () => {
+                    const currentState = cardElement.dataset.showHint === 'true';
+                    cardElement.dataset.showHint = !currentState;
+                    // Re-render the specific card to show/hide the hint
+                    cardElement.outerHTML = renderExerciseCard(exercisesData.find(e => e.id === exerciseId));
+                    addCardEventListeners(exerciseId);
+                };
+            }
+        };
+
+        const renderApp = () => {
+            const root = document.getElementById('app-root');
+            const header = document.getElementById('app-header');
+            const navContainer = document.getElementById('tab-navigation-container');
+            const contentArea = document.getElementById('content-area');
+            const darkModeContainer = document.getElementById('dark-mode-toggle-container');
+
+            // 1. Apply Dark Mode Class
+            document.documentElement.classList.toggle('dark', isDarkMode);
+            root.classList.remove('bg-gray-50', 'dark:bg-gray-900');
+            root.classList.add(isDarkMode ? 'dark:bg-gray-900' : 'bg-gray-50');
+
+            // 2. Render Dark Mode Toggle
+            darkModeContainer.innerHTML = `
+                <button onclick="window.toggleDarkMode()"
+                    class="p-3 rounded-full bg-slate-700 dark:bg-slate-700 shadow-lg text-gray-200 dark:text-yellow-400 hover:shadow-xl transition-all duration-300 border border-slate-600"
+                    aria-label="${isDarkMode ? 'Passer au Mode Clair' : 'Passer au Mode Sombre'}"
+                >
+                    ${isDarkMode ? SVG_SUN : SVG_MOON}
+                </button>
+            `;
+            window.toggleDarkMode = toggleDarkMode; // Expose to global scope for inline onclick
+
+            // 3. Render Header
+            const allCompleted = score >= exercisesData.length;
+            const completionMessage = allCompleted 
+                ? "Félicitations ! Vous avez complété tous les exercices. 🥳"
+                : `Vous avez complété ${score} sur ${exercisesData.length} exercices.`;
+
+            header.innerHTML = `
+                <h1 class="text-4xl font-extrabold text-blue-300 dark:text-blue-300 flex items-center justify-center">
+                    <span class="w-8 h-8 mr-3 text-yellow-400 dark:text-yellow-400">${SVG_ZAP}</span>
+                    Maître de Conjugaison Française 🇫🇷
+                    <span class="w-8 h-8 ml-3 text-blue-400 dark:text-blue-400">${SVG_BOOK_OPEN}</span>
+                </h1>
+                <p class="mt-2 text-xl text-gray-400 dark:text-gray-400">
+                    Pratiquez le Passé Composé, le Futur Simple et le Présent Simple!
+                </p>
+                <p class="mt-1 text-sm text-gray-500 dark:text-gray-500">
+                    ID Utilisateur: ${isAuthReady ? (userId || 'Anonyme') : 'Chargement...'}
+                </p>
+            `;
+
+            // 4. Render Tab Navigation
+            navContainer.innerHTML = `
+                <button onclick="window.setActiveTab('exercises')"
+                    class="px-6 py-3 rounded-full font-bold transition-all duration-300 shadow-md ${
+                        activeTab === 'exercises'
+                            ? 'bg-blue-600 text-white hover:bg-blue-700'
+                            : 'bg-slate-700 text-blue-300 border border-slate-600 hover:bg-slate-600'
+                    }"
+                >
+                    Exercices (${exercisesData.length}) 📝
+                </button>
+                <button onclick="window.setActiveTab('reference')"
+                    class="px-6 py-3 rounded-full font-bold transition-all duration-300 shadow-md ${
+                        activeTab === 'reference'
+                            ? 'bg-blue-600 text-white hover:bg-blue-700'
+                            : 'bg-slate-700 text-blue-300 border border-slate-600 hover:bg-slate-600'
+                    }"
+                >
+                    Référence de Conjugaison 📚
+                </button>
+            `;
+            window.setActiveTab = (tab) => { activeTab = tab; renderApp(); };
+
+            // 5. Render Content Area
+            let contentHTML = '';
+
+            if (activeTab === 'exercises') {
+                contentHTML = `
+                    <h2 class="text-2xl font-bold text-gray-100 dark:text-gray-100 mb-4 border-b pb-2 dark:border-slate-700">
+                        Section d'Exercices 🧠
+                    </h2>
+                    <div class="p-4 rounded-xl mb-6 font-semibold text-center transition-colors ${allCompleted 
+                        ? 'bg-green-800 dark:bg-green-800 text-green-300 dark:text-green-300' 
+                        : 'bg-indigo-900 dark:bg-indigo-900 text-indigo-300 dark:text-indigo-300'}">
+                        ${completionMessage}
+                    </div>
+                    <div id="exercises-list" class="space-y-6">
+                        ${exercisesData.map(renderExerciseCard).join('')}
+                    </div>
+                    <div class="mt-8 text-center p-4 bg-slate-700 dark:bg-slate-700 rounded-xl transition-colors">
+                        <button onclick="window.resetApp()"
+                            class="px-6 py-3 bg-red-600 text-white font-bold rounded-full shadow-lg hover:bg-red-700 transition duration-200"
+                        >
+                            Réinitialiser les Exercices 🔁
+                        </button>
+                    </div>
+                `;
+            } else if (activeTab === 'reference') {
+                contentHTML = `
+                    <h2 class="text-2xl font-bold text-gray-100 dark:text-gray-100 mb-6 border-b pb-2 dark:border-slate-700">
+                        Référence de Conjugaison 📘
+                    </h2>
+                    <p class="text-gray-300 dark:text-gray-300 mb-6">
+                        Consultez les règles de conjugaison pour les temps verbaux en focus.
+                    </p>
+                    ${referenceData.map(renderReferenceTable).join('')}
+                `;
+            }
+
+            contentArea.innerHTML = contentHTML;
+
+            // 6. Attach Event Listeners (only for the exercises tab)
+            if (activeTab === 'exercises') {
+                exercisesData.forEach(ex => addCardEventListeners(ex.id));
+                window.resetApp = resetApp;
+            }
+        };
+
+        // --- INITIALIZATION ---
+        document.addEventListener('DOMContentLoaded', () => {
+            // Restore dark mode preference
+            const savedDarkMode = localStorage.getItem('isDarkMode');
+            if (savedDarkMode !== null) {
+                isDarkMode = savedDarkMode === 'true';
+            }
+            
+            // 1. Start Firebase Auth
+            handleAuth();
+            
+            // 2. Initial Render (will update after auth)
+            renderApp();
+        });
+
+    </script>
+</body>
+</html>
